@@ -1,4 +1,3 @@
-//graphics.cpp
 #include "graphics.h"
 #include <algorithm>
 #include <limits>
@@ -55,18 +54,38 @@ void GraphicsRenderer::triangle(const VertexOutput& v0, const VertexOutput& v1, 
       if (depth < depth_buffer_[idx]) {
         VertexOutput interpolated;
 
-        interpolated.world_position.x = v0.world_position.x * bc.x + v1.world_position.x * bc.y + v2.world_position.x * bc.z;
-        interpolated.world_position.y = v0.world_position.y * bc.x + v1.world_position.y * bc.y + v2.world_position.y * bc.z;
-        interpolated.world_position.z = v0.world_position.z * bc.x + v1.world_position.z * bc.y + v2.world_position.z * bc.z;
+        // Перспективно-корректная интерполяция
+        float reciprocal_w = v0.reciprocal_w * bc.x + v1.reciprocal_w * bc.y + v2.reciprocal_w * bc.z;
+        float z = 1.0f / reciprocal_w;
+
+        interpolated.world_position.x = (v0.world_position.x * v0.reciprocal_w * bc.x +
+          v1.world_position.x * v1.reciprocal_w * bc.y +
+          v2.world_position.x * v2.reciprocal_w * bc.z) * z;
+        interpolated.world_position.y = (v0.world_position.y * v0.reciprocal_w * bc.x +
+          v1.world_position.y * v1.reciprocal_w * bc.y +
+          v2.world_position.y * v2.reciprocal_w * bc.z) * z;
+        interpolated.world_position.z = (v0.world_position.z * v0.reciprocal_w * bc.x +
+          v1.world_position.z * v1.reciprocal_w * bc.y +
+          v2.world_position.z * v2.reciprocal_w * bc.z) * z;
 
         Vec3 normal;
-        normal.x = v0.normal.x * bc.x + v1.normal.x * bc.y + v2.normal.x * bc.z;
-        normal.y = v0.normal.y * bc.x + v1.normal.y * bc.y + v2.normal.y * bc.z;
-        normal.z = v0.normal.z * bc.x + v1.normal.z * bc.y + v2.normal.z * bc.z;
+        normal.x = (v0.normal.x * v0.reciprocal_w * bc.x +
+          v1.normal.x * v1.reciprocal_w * bc.y +
+          v2.normal.x * v2.reciprocal_w * bc.z) * z;
+        normal.y = (v0.normal.y * v0.reciprocal_w * bc.x +
+          v1.normal.y * v1.reciprocal_w * bc.y +
+          v2.normal.y * v2.reciprocal_w * bc.z) * z;
+        normal.z = (v0.normal.z * v0.reciprocal_w * bc.x +
+          v1.normal.z * v1.reciprocal_w * bc.y +
+          v2.normal.z * v2.reciprocal_w * bc.z) * z;
         interpolated.normal = normal.normalize();
 
-        interpolated.texcoord.x = v0.texcoord.x * bc.x + v1.texcoord.x * bc.y + v2.texcoord.x * bc.z;
-        interpolated.texcoord.y = v0.texcoord.y * bc.x + v1.texcoord.y * bc.y + v2.texcoord.y * bc.z;
+        interpolated.texcoord.x = (v0.texcoord.x * v0.reciprocal_w * bc.x +
+          v1.texcoord.x * v1.reciprocal_w * bc.y +
+          v2.texcoord.x * v2.reciprocal_w * bc.z) * z;
+        interpolated.texcoord.y = (v0.texcoord.y * v0.reciprocal_w * bc.x +
+          v1.texcoord.y * v1.reciprocal_w * bc.y +
+          v2.texcoord.y * v2.reciprocal_w * bc.z) * z;
 
         TGAColor color = shader.fragment(interpolated);
         image_.set(x, y, color);
@@ -99,7 +118,7 @@ void GraphicsRenderer::render(Model& model, IShader& shader) {
       input[j].normal = (norms[j] >= 0) ? model.normal(norms[j]) : Vec3(0, 1, 0);
       input[j].texcoord = (texcoords[j] >= 0) ? model.texcoord(texcoords[j]) : Vec2(0, 0);
 
-            output[j] = shader.vertex(input[j]);
+      output[j] = shader.vertex(input[j]);
     }
 
     triangle(output[0], output[1], output[2], shader);

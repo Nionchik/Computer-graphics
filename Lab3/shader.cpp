@@ -75,7 +75,7 @@ TGAColor PhongShader::fragment(const VertexOutput& in) {
   // Преобразуем цвет текстуры в [0,1] диапазон
   Vec3 texture_color = Vec3(base_color.r / 255.0f, base_color.g / 255.0f, base_color.b / 255.0f);
 
-  // УМНОЖАЕМ НА ОСВЕЩЕНИЕ (а не наоборот)
+  // УМНОЖАЕМ НА ОСВЕЩЕНИЕ
   Vec3 result = texture_color * (ambient + diffuse) + specular;
 
   result.x = std::max(0.0f, std::min(result.x, 1.0f));

@@ -1,6 +1,6 @@
-//texture.cpp
 #include "texture.h"
 #include <iostream>
+#include <cmath>
 
 Texture::Texture(const std::string& filename) : image_(0, 0, 0), width_(0), height_(0) {
   if (!image_.read_tga_file(filename.c_str())) {
@@ -14,18 +14,9 @@ Texture::Texture(const std::string& filename) : image_(0, 0, 0), width_(0), heig
 TGAColor Texture::sample(float u, float v) const {
   if (width_ == 0 || height_ == 0) return TGAColor(255, 255, 255);
 
-  // ПРИМЕНЯЕМ МАСШТАБИРОВАНИЕ - УМЕНЬШАЕМ ТЕКСТУРУ
-  u = u * scale_;
-  v = v * scale_;
-
-  // Повторяем текстуру (tile) если координаты выходят за [0,1]
   u = u - std::floor(u);
   v = v - std::floor(v);
 
-  u = std::max(0.0f, std::min(1.0f, u));
-  v = std::max(0.0f, std::min(1.0f, v));
-
-  // Используем билинейную фильтрацию
   return sample_bilinear(u, v);
 }
 

@@ -1,4 +1,3 @@
-//model.cpp
 #include "model.h"
 #include <fstream>
 #include <sstream>
@@ -66,13 +65,9 @@ Model::Model(const std::string& filename) {
     }
   }
 
-  // ГЕНЕРИРУЕМ UV КООРДИНАТЫ ЕСЛИ ИХ НЕТ
   if (texcoords_.empty()) {
-
     for (size_t i = 0; i < vertices_.size(); i++) {
       const Vec3& vertex = vertices_[i];
-
-      // Сферические координаты для UV
       Vec3 normalized = vertex.normalize();
       float u = 0.5f + std::atan2(normalized.z, normalized.x) / (2.0f * 3.14159265f);
       float v = 0.5f - std::asin(normalized.y) / 3.14159265f;
@@ -83,19 +78,14 @@ Model::Model(const std::string& filename) {
       texcoords_.push_back(Vec2(u, v));
     }
 
-    // Обновляем грани чтобы использовали сгенерированные UV
     for (auto& face : faces_) {
       for (int j = 0; j < 3; j++) {
         face.texcoord_ids[j] = face.vertex_ids[j];
       }
     }
 
-    std::cout << "Generated " << texcoords_.size() << " UV coordinates" << std::endl;
   }
 
-  std::cout << "Loaded model: " << vertices_.size() << " vertices, "
-    << faces_.size() << " faces, " << normals_.size() << " normals, "
-    << texcoords_.size() << " texture coordinates" << std::endl;
 }
 
 void Model::get_face(int i, int* vertices, int* normals, int* texcoords) const {
@@ -105,7 +95,6 @@ void Model::get_face(int i, int* vertices, int* normals, int* texcoords) const {
     normals[j] = face.normal_ids[j];
     texcoords[j] = face.texcoord_ids[j];
 
-    // Гарантируем что индексы в пределах массива
     if (texcoords[j] < 0 || texcoords[j] >= (int)texcoords_.size()) {
       texcoords[j] = 0;
     }
