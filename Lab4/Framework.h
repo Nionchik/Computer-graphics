@@ -27,4 +27,4 @@ using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 
 // Вспомогательные структуры DirectX 12
-#include "d3dx12.h"  // Для CD3DX12_* помощников
+#include "d3dx12.h" 

@@ -423,10 +423,10 @@ bool CubeRenderer::LoadShaders()
   psoDesc.VS = { vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize() };
   psoDesc.PS = { pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize() };
 
-  // Растеризатор (CULL_NONE как в DirectX 11)
+  // Растеризатор
   D3D12_RASTERIZER_DESC rasterizerDesc = {};
   rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
-  rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE;  // ВАЖНО: как в DX11 коде
+  rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE;
   rasterizerDesc.FrontCounterClockwise = FALSE;
   rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
   rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
@@ -492,7 +492,7 @@ bool CubeRenderer::CreatePipelineState()
 
 bool CubeRenderer::CreateBuffers()
 {
-  // Вершины куба с ГРАДИЕНТНЫМИ цветами (как в DirectX 11)
+  // Вершины куба с ГРАДИЕНТНЫМИ цветами
   Vertex vertices[24] = {
     // Нижняя грань (y = -1)
     { XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },  // Красный
@@ -531,7 +531,7 @@ bool CubeRenderer::CreateBuffers()
     { XMFLOAT3(1.0f,  1.0f,  1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) }     // Синий
   };
 
-  // Индексы (как в DirectX 11)
+  // Индексы
   UINT indices[36] = {
       0, 1, 2,  0, 2, 3,     // Нижняя
       4, 5, 6,  4, 6, 7,     // Верхняя
@@ -654,7 +654,7 @@ bool CubeRenderer::CreateBuffers()
 
 void CubeRenderer::SetupMatrices()
 {
-  // Матрицы как в DirectX 11 версии
+  // Матрицы
   m_WorldMatrix = XMMatrixIdentity();
 
   XMVECTOR eyePosition = XMVectorSet(3.0f, 3.0f, -3.0f, 0.0f);
@@ -672,7 +672,7 @@ void CubeRenderer::SetupMatrices()
 
 void CubeRenderer::SetupLight()
 {
-  // Данные освещения как в DirectX 11
+  // Данные освещения
   LightBuffer lightData;
   lightData.lightPos = XMFLOAT3(2.0f, 5.0f, -3.0f);
   lightData.cameraPos = XMFLOAT3(3.0f, 3.0f, -3.0f);
@@ -695,11 +695,11 @@ void CubeRenderer::PopulateCommandList()
   hr = m_CommandList->Reset(m_CommandAllocators[m_FrameIndex].Get(), m_PipelineState.Get());
   if (FAILED(hr)) return;
 
-  // ВРАЩЕНИЕ КАК В DIRECTX 11
+  // ВРАЩЕНИЕ
   m_Timer.Tick();
-  m_RotationAngle += m_Timer.GetDeltaTime() * 0.3f;  // Такая же скорость как в DX11
+  m_RotationAngle += m_Timer.GetDeltaTime() * 0.3f;
 
-  // Обновление матриц - ТАКОЕ ЖЕ ВРАЩЕНИЕ как в DirectX 11
+  // Обновление матриц
   XMMATRIX rotationX = XMMatrixRotationX(m_RotationAngle * 0.5f);
   XMMATRIX rotationY = XMMatrixRotationY(m_RotationAngle);
   XMMATRIX rotationZ = XMMatrixRotationZ(m_RotationAngle * 0.3f);
@@ -734,7 +734,7 @@ void CubeRenderer::PopulateCommandList()
 
   m_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-  // Очистка светло-зеленым цветом (как в DirectX 11)
+  // Очистка светло-зеленым цветом
   float clearColor[4] = { 0.56f, 0.93f, 0.56f, 1.0f };
   m_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
   m_CommandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
