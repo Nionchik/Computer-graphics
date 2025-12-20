@@ -1,7 +1,7 @@
-//CubeRenderer.h
 #pragma once
 #include "Framework.h"
 #include "Timer.h"
+#include <vector>
 
 struct Vertex
 {
@@ -42,11 +42,17 @@ private:
   bool InitializeDirect3D(HWND hwnd);
   bool LoadShaders();
   bool CreatePipelineState();
-  bool CreateBuffers();
+  bool LoadModel(const std::string& filename);
+  void CreateDefaultCube();
   void SetupMatrices();
   void SetupLight();
   void PopulateCommandList();
   void WaitForPreviousFrame();
+  void UpdateCamera();
+
+  XMFLOAT3 CalculateNormal(const XMFLOAT3& v0, const XMFLOAT3& v1, const XMFLOAT3& v2);
+  XMFLOAT4 GenerateVertexColor(const XMFLOAT3& position, const XMFLOAT3& normal);
+  void ComputeBoundingBox();
 
   static const int FrameCount = 2;
 
@@ -78,10 +84,27 @@ private:
   ComPtr<ID3D12Fence> m_Fence;
   UINT64 m_FenceValues[FrameCount] = {};
 
+  // Данные модели
+  std::vector<Vertex> m_Vertices;
+  std::vector<UINT> m_Indices;
+  XMFLOAT3 m_MinBounds;
+  XMFLOAT3 m_MaxBounds;
+  XMFLOAT3 m_Center;
+  float m_Radius;
+
+  // Матрицы и камера
   XMMATRIX m_WorldMatrix;
   XMMATRIX m_ViewMatrix;
   XMMATRIX m_ProjectionMatrix;
-  float m_RotationAngle = 0.0f;
+  XMFLOAT3 m_CameraPosition;
+  XMFLOAT3 m_CameraTarget;
+  float m_CameraDistance;
+  float m_CameraRotationX;
+  float m_CameraRotationY;
+
+  // Вращение модели
+  float m_RotationAngle;
+
   int m_WindowWidth;
   int m_WindowHeight;
   bool m_Initialized = false;

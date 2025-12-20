@@ -1,17 +1,31 @@
 ﻿#include "CubeRenderer.h"
 #include <iostream>
+#include <fstream>
+#include <sstream>
+#include <algorithm>
+#include <DirectXColors.h>
 
 #ifdef _DEBUG
 #include <dxgidebug.h>
 #endif
 
 CubeRenderer::CubeRenderer()
-  : m_WindowWidth(800)
-  , m_WindowHeight(600)
+  : m_WindowWidth(1280)
+  , m_WindowHeight(720)
   , m_FenceEvent(nullptr)
   , m_WorldMatrix(XMMatrixIdentity())
   , m_ViewMatrix(XMMatrixIdentity())
   , m_ProjectionMatrix(XMMatrixIdentity())
+  , m_MinBounds(0.0f, 0.0f, 0.0f)
+  , m_MaxBounds(0.0f, 0.0f, 0.0f)
+  , m_Center(0.0f, 0.0f, 0.0f)
+  , m_Radius(1.0f)
+  , m_CameraPosition(0.0f, 0.0f, 0.0f)
+  , m_CameraTarget(0.0f, 0.0f, 0.0f)
+  , m_CameraDistance(0.0f)
+  , m_CameraRotationX(0.0f)
+  , m_CameraRotationY(0.0f)
+  , m_IndexCount(0)
   , m_RotationAngle(0.0f)
 {
 }
@@ -38,9 +52,16 @@ bool CubeRenderer::Initialize(HWND hwnd, int width, int height)
     return false;
   }
 
-  if (!CreateBuffers())
+  if (!CreatePipelineState())
   {
-    MessageBoxW(hwnd, L"Failed to create buffers", L"Error", MB_OK);
+    MessageBoxW(hwnd, L"Failed to create pipeline state", L"Error", MB_OK);
+    return false;
+  }
+
+  // Загрузка модели sponza.obj
+  if (!LoadModel("sponza.obj"))
+  {
+    MessageBoxW(hwnd, L"Failed to load sponza.obj", L"Error", MB_OK);
     return false;
   }
 
@@ -68,7 +89,7 @@ bool CubeRenderer::InitializeDirect3D(HWND hwnd)
   hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
   if (FAILED(hr)) return false;
 
-  // Создание устройства (пытаемся сначала аппаратное, потом WARP)
+  // Создание устройства
   hr = D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_Device));
   if (FAILED(hr))
   {
@@ -222,7 +243,7 @@ bool CubeRenderer::InitializeDirect3D(HWND hwnd)
 
 bool CubeRenderer::LoadShaders()
 {
-  // ВЕРШИННЫЙ ШЕЙДЕР с освещением по Фонгу
+  // Вершинный шейдер с освещением по Фонгу
   const char* vsCode = R"(
         cbuffer MatrixBuffer : register(b0)
         {
@@ -266,6 +287,7 @@ bool CubeRenderer::LoadShaders()
             pos = mul(pos, projection);
             output.position = pos;
             
+            // Преобразование нормали в мировое пространство
             output.normal = mul(float4(input.normal, 0.0f), world).xyz;
             output.color = input.color;
             
@@ -273,7 +295,7 @@ bool CubeRenderer::LoadShaders()
         }
     )";
 
-  // ПИКСЕЛЬНЫЙ ШЕЙДЕР с освещением по Фонгу
+  // Пиксельный шейдер с освещением по Фонгу
   const char* psCode = R"(
         struct PS_IN
         {
@@ -298,15 +320,22 @@ bool CubeRenderer::LoadShaders()
             float3 lightDir = normalize(lightPos - input.worldPos);
             float3 viewDir = normalize(cameraPos - input.worldPos);
             
+            // Диффузное освещение
             float diffuse = max(dot(normal, lightDir), 0.0f);
+            
+            // Отраженное направление
             float3 reflectDir = reflect(-lightDir, normal);
+            
+            // Зеркальное освещение
             float specular = pow(max(dot(viewDir, reflectDir), 0.0f), 32.0f);
             
+            // Комбинирование освещения
             float3 ambient = float3(0.2f, 0.2f, 0.2f);
             float3 lighting = ambient + 
                              diffuse * lightColor.rgb * 0.8f + 
                              specular * 0.5f;
             
+            // Применяем освещение к цвету вершины
             float4 finalColor = input.color;
             finalColor.rgb *= lighting;
             
@@ -487,64 +516,167 @@ bool CubeRenderer::LoadShaders()
 
 bool CubeRenderer::CreatePipelineState()
 {
+  // Эта функция просто проверяет, создан ли PSO
   return m_PipelineState != nullptr;
 }
 
-bool CubeRenderer::CreateBuffers()
+bool CubeRenderer::LoadModel(const std::string& filename)
 {
-  // Вершины куба с ГРАДИЕНТНЫМИ цветами
-  Vertex vertices[24] = {
-    // Нижняя грань (y = -1)
-    { XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },  // Красный
-    { XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },   // Зеленый
-    { XMFLOAT3(1.0f, -1.0f,  1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },   // Синий
-    { XMFLOAT3(-1.0f, -1.0f,  1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },  // Желтый
+  std::ifstream file(filename);
+  if (!file.is_open())
+  {
+    // Если файл не найден, создаем куб по умолчанию
+    CreateDefaultCube();
+    return true; // Продолжаем с кубом
+  }
 
-    // Верхняя грань (y = 1)
-    { XMFLOAT3(-1.0f,  1.0f, -1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(0.5f, 0.0f, 0.5f, 1.0f) },   // Фиолетовый
-    { XMFLOAT3(1.0f,  1.0f, -1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(1.0f, 0.5f, 0.0f, 1.0f) },    // Оранжевый
-    { XMFLOAT3(1.0f,  1.0f,  1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },    // Бирюзовый
-    { XMFLOAT3(-1.0f,  1.0f,  1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(1.0f, 0.0f, 0.5f, 1.0f) },   // Розовый
+  std::vector<XMFLOAT3> positions;
+  std::vector<XMFLOAT3> normals;
+  std::vector<XMFLOAT2> texcoords;
+  std::string line;
 
-    // Передняя грань (z = 1)
-    { XMFLOAT3(-1.0f, -1.0f,  1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },   // Синий
-    { XMFLOAT3(1.0f, -1.0f,  1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },    // Зеленый
-    { XMFLOAT3(1.0f,  1.0f,  1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },   // Красный
-    { XMFLOAT3(-1.0f,  1.0f,  1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },  // Желтый
+  while (std::getline(file, line))
+  {
+    std::istringstream iss(line);
+    std::string type;
+    iss >> type;
 
-    // Задняя грань (z = -1)
-    { XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) }, // Желтый
-    { XMFLOAT3(-1.0f,  1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },  // Красный
-    { XMFLOAT3(1.0f,  1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },   // Зеленый
-    { XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },   // Синий
+    if (type == "v")
+    {
+      XMFLOAT3 pos;
+      iss >> pos.x >> pos.y >> pos.z;
+      positions.push_back(pos);
+    }
+    else if (type == "vn")
+    {
+      XMFLOAT3 normal;
+      iss >> normal.x >> normal.y >> normal.z;
+      normals.push_back(normal);
+    }
+    else if (type == "vt")
+    {
+      XMFLOAT2 texcoord;
+      iss >> texcoord.x >> texcoord.y;
+      texcoords.push_back(texcoord);
+    }
+    else if (type == "f")
+    {
+      std::string v1, v2, v3;
+      iss >> v1 >> v2 >> v3;
 
-    // Левая грань (x = -1)
-    { XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },  // Зеленый
-    { XMFLOAT3(-1.0f, -1.0f,  1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },   // Синий
-    { XMFLOAT3(-1.0f,  1.0f,  1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },   // Красный
-    { XMFLOAT3(-1.0f,  1.0f, -1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },   // Желтый
+      // Функция для парсинга индексов OBJ формата
+      auto parseFace = [](const std::string& token, int& posIdx, int& texIdx, int& normIdx) {
+        std::string tokenCopy = token;
+        std::replace(tokenCopy.begin(), tokenCopy.end(), '/', ' ');
+        std::istringstream tokenStream(tokenCopy);
 
-    // Правая грань (x = 1)
-    { XMFLOAT3(1.0f, -1.0f,  1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },    // Красный
-    { XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },    // Желтый
-    { XMFLOAT3(1.0f,  1.0f, -1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },    // Зеленый
-    { XMFLOAT3(1.0f,  1.0f,  1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) }     // Синий
-  };
+        std::string posStr, texStr, normStr;
+        tokenStream >> posStr;
+        if (!tokenStream.eof()) tokenStream >> texStr;
+        if (!tokenStream.eof()) tokenStream >> normStr;
 
-  // Индексы
-  UINT indices[36] = {
-      0, 1, 2,  0, 2, 3,     // Нижняя
-      4, 5, 6,  4, 6, 7,     // Верхняя
-      8, 9, 10, 8, 10, 11,   // Передняя
-      12, 13, 14, 12, 14, 15,// Задняя
-      16, 17, 18, 16, 18, 19,// Левая
-      20, 21, 22, 20, 22, 23 // Правая
-  };
+        posIdx = posStr.empty() ? -1 : std::stoi(posStr) - 1;
+        texIdx = texStr.empty() ? -1 : std::stoi(texStr) - 1;
+        normIdx = normStr.empty() ? -1 : std::stoi(normStr) - 1;
+        };
 
-  m_IndexCount = 36;
+      int posIdx1, texIdx1, normIdx1;
+      int posIdx2, texIdx2, normIdx2;
+      int posIdx3, texIdx3, normIdx3;
 
-  // Создание вершинного буфера
-  const UINT vertexBufferSize = sizeof(vertices);
+      parseFace(v1, posIdx1, texIdx1, normIdx1);
+      parseFace(v2, posIdx2, texIdx2, normIdx2);
+      parseFace(v3, posIdx3, texIdx3, normIdx3);
+
+      if (posIdx1 >= 0 && posIdx1 < (int)positions.size() &&
+        posIdx2 >= 0 && posIdx2 < (int)positions.size() &&
+        posIdx3 >= 0 && posIdx3 < (int)positions.size())
+      {
+        Vertex v[3];
+
+        // Позиции
+        v[0].position = positions[posIdx1];
+        v[1].position = positions[posIdx2];
+        v[2].position = positions[posIdx3];
+
+        // Нормали (если есть в файле)
+        if (normIdx1 >= 0 && normIdx1 < (int)normals.size())
+          v[0].normal = normals[normIdx1];
+        else
+          v[0].normal = XMFLOAT3(0, 1, 0);
+
+        if (normIdx2 >= 0 && normIdx2 < (int)normals.size())
+          v[1].normal = normals[normIdx2];
+        else
+          v[1].normal = XMFLOAT3(0, 1, 0);
+
+        if (normIdx3 >= 0 && normIdx3 < (int)normals.size())
+          v[2].normal = normals[normIdx3];
+        else
+          v[2].normal = XMFLOAT3(0, 1, 0);
+
+        // Пока что белый цвет, потом заменим на градиентный
+        v[0].color = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+        v[1].color = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+        v[2].color = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+
+        m_Vertices.push_back(v[0]);
+        m_Vertices.push_back(v[1]);
+        m_Vertices.push_back(v[2]);
+      }
+    }
+  }
+
+  file.close();
+
+  if (m_Vertices.empty())
+  {
+    // Если модель не загрузилась, создаем простой куб
+    CreateDefaultCube();
+  }
+  else
+  {
+    // Если нормалей нет в файле, вычисляем их
+    if (normals.empty())
+    {
+      for (size_t i = 0; i < m_Vertices.size(); i += 3)
+      {
+        XMFLOAT3 normal = CalculateNormal(
+          m_Vertices[i].position,
+          m_Vertices[i + 1].position,
+          m_Vertices[i + 2].position
+        );
+
+        m_Vertices[i].normal = normal;
+        m_Vertices[i + 1].normal = normal;
+        m_Vertices[i + 2].normal = normal;
+      }
+    }
+  }
+
+  // Вычисляем bounding box
+  ComputeBoundingBox();
+
+  // Теперь применяем градиентную раскраску
+  for (auto& vertex : m_Vertices)
+  {
+    vertex.color = GenerateVertexColor(vertex.position, vertex.normal);
+  }
+
+  // Создаем индексы
+  m_Indices.resize(m_Vertices.size());
+  for (size_t i = 0; i < m_Vertices.size(); i++)
+  {
+    m_Indices[i] = static_cast<UINT>(i);
+  }
+
+  m_IndexCount = static_cast<UINT>(m_Indices.size());
+
+  std::cout << "Model loaded: " << m_Vertices.size() << " vertices, "
+    << m_IndexCount << " indices" << std::endl;
+
+  // Создаем вершинный буфер
+  const UINT vertexBufferSize = static_cast<UINT>(m_Vertices.size() * sizeof(Vertex));
 
   D3D12_HEAP_PROPERTIES heapProps = {};
   heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -583,7 +715,7 @@ bool CubeRenderer::CreateBuffers()
   hr = m_VertexBuffer->Map(0, &readRange, &pVertexDataBegin);
   if (FAILED(hr)) return false;
 
-  memcpy(pVertexDataBegin, vertices, sizeof(vertices));
+  memcpy(pVertexDataBegin, m_Vertices.data(), vertexBufferSize);
   m_VertexBuffer->Unmap(0, nullptr);
 
   // Инициализация вершинного буферного представления
@@ -592,7 +724,7 @@ bool CubeRenderer::CreateBuffers()
   m_VertexBufferView.SizeInBytes = vertexBufferSize;
 
   // Создание индексного буфера
-  const UINT indexBufferSize = sizeof(indices);
+  const UINT indexBufferSize = static_cast<UINT>(m_Indices.size() * sizeof(UINT));
   resourceDesc.Width = indexBufferSize;
 
   hr = m_Device->CreateCommittedResource(
@@ -611,7 +743,7 @@ bool CubeRenderer::CreateBuffers()
   hr = m_IndexBuffer->Map(0, &readRange, &pIndexDataBegin);
   if (FAILED(hr)) return false;
 
-  memcpy(pIndexDataBegin, indices, sizeof(indices));
+  memcpy(pIndexDataBegin, m_Indices.data(), indexBufferSize);
   m_IndexBuffer->Unmap(0, nullptr);
 
   // Инициализация индексного буферного представления
@@ -652,30 +784,183 @@ bool CubeRenderer::CreateBuffers()
   return true;
 }
 
+void CubeRenderer::CreateDefaultCube()
+{
+  // Создаем простой куб если модель не загрузилась
+  Vertex cubeVertices[] = {
+    // Передняя грань
+    { XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
+    { XMFLOAT3(-1.0f,  1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+    { XMFLOAT3(1.0f,  1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
+    { XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },
+    // Задняя грань
+    { XMFLOAT3(-1.0f, -1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f) },
+    { XMFLOAT3(-1.0f,  1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },
+    { XMFLOAT3(1.0f,  1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f) },
+    { XMFLOAT3(1.0f, -1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(0.5f, 0.5f, 0.5f, 1.0f) },
+  };
+
+  UINT cubeIndices[] = {
+      0, 1, 2, 0, 2, 3,  // Передняя
+      4, 6, 5, 4, 7, 6,  // Задняя
+      4, 5, 1, 4, 1, 0,  // Левая
+      3, 2, 6, 3, 6, 7,  // Правая
+      1, 5, 6, 1, 6, 2,  // Верхняя
+      4, 0, 3, 4, 3, 7   // Нижняя
+  };
+
+  m_Vertices.assign(cubeVertices, cubeVertices + 8);
+  m_Indices.assign(cubeIndices, cubeIndices + 36);
+}
+
+XMFLOAT3 CubeRenderer::CalculateNormal(const XMFLOAT3& v0, const XMFLOAT3& v1, const XMFLOAT3& v2)
+{
+  XMFLOAT3 edge1(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z);
+  XMFLOAT3 edge2(v2.x - v0.x, v2.y - v0.y, v2.z - v0.z);
+
+  XMFLOAT3 normal;
+  normal.x = edge1.y * edge2.z - edge1.z * edge2.y;
+  normal.y = edge1.z * edge2.x - edge1.x * edge2.z;
+  normal.z = edge1.x * edge2.y - edge1.y * edge2.x;
+
+  // Нормализуем
+  float length = sqrtf(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+  if (length > 0)
+  {
+    normal.x /= length;
+    normal.y /= length;
+    normal.z /= length;
+  }
+
+  return normal;
+}
+
+XMFLOAT4 CubeRenderer::GenerateVertexColor(const XMFLOAT3& position, const XMFLOAT3& normal)
+{
+  // Проверяем, чтобы не было деления на ноль
+  if (m_MaxBounds.x - m_MinBounds.x < 0.0001f ||
+    m_MaxBounds.y - m_MinBounds.y < 0.0001f ||
+    m_MaxBounds.z - m_MinBounds.z < 0.0001f)
+  {
+    // Если bounding box слишком маленький, используем случайные цвета
+    return XMFLOAT4(0.7f, 0.7f, 0.7f, 1.0f);
+  }
+
+  // Градиентный цвет на основе позиции
+  float r = (position.x - m_MinBounds.x) / (m_MaxBounds.x - m_MinBounds.x);
+  float g = (position.y - m_MinBounds.y) / (m_MaxBounds.y - m_MinBounds.y);
+  float b = (position.z - m_MinBounds.z) / (m_MaxBounds.z - m_MinBounds.z);
+
+  // Яркие цвета
+  r = 0.3f + 0.7f * r;
+  g = 0.3f + 0.7f * g;
+  b = 0.3f + 0.7f * b;
+
+  // Влияние нормали для объемности
+  float lightFactor = 0.5f + 0.5f * normal.y;
+
+  r *= lightFactor;
+  g *= lightFactor;
+  b *= lightFactor;
+
+  // Ограничиваем
+  r = max(0.0f, min(1.0f, r));
+  g = max(0.0f, min(1.0f, g));
+  b = max(0.0f, min(1.0f, b));
+
+  return XMFLOAT4(r, g, b, 1.0f);
+}
+
+void CubeRenderer::ComputeBoundingBox()
+{
+  if (m_Vertices.empty())
+    return;
+
+  m_MinBounds = m_Vertices[0].position;
+  m_MaxBounds = m_Vertices[0].position;
+
+  for (const auto& vertex : m_Vertices)
+  {
+    m_MinBounds.x = min(m_MinBounds.x, vertex.position.x);
+    m_MinBounds.y = min(m_MinBounds.y, vertex.position.y);
+    m_MinBounds.z = min(m_MinBounds.z, vertex.position.z);
+
+    m_MaxBounds.x = max(m_MaxBounds.x, vertex.position.x);
+    m_MaxBounds.y = max(m_MaxBounds.y, vertex.position.y);
+    m_MaxBounds.z = max(m_MaxBounds.z, vertex.position.z);
+  }
+
+  m_Center = XMFLOAT3(
+    (m_MinBounds.x + m_MaxBounds.x) * 0.5f,
+    (m_MinBounds.y + m_MaxBounds.y) * 0.5f,
+    (m_MinBounds.z + m_MaxBounds.z) * 0.5f
+  );
+
+  // Вычисляем радиус
+  m_Radius = 0.0f;
+  for (const auto& vertex : m_Vertices)
+  {
+    float dx = vertex.position.x - m_Center.x;
+    float dy = vertex.position.y - m_Center.y;
+    float dz = vertex.position.z - m_Center.z;
+    float distance = sqrtf(dx * dx + dy * dy + dz * dz);
+    m_Radius = max(m_Radius, distance);
+  }
+
+  std::cout << "Bounding box: min(" << m_MinBounds.x << ", " << m_MinBounds.y << ", " << m_MinBounds.z << ")"
+    << " max(" << m_MaxBounds.x << ", " << m_MaxBounds.y << ", " << m_MaxBounds.z << ")" << std::endl;
+  std::cout << "Center: (" << m_Center.x << ", " << m_Center.y << ", " << m_Center.z << ")" << std::endl;
+  std::cout << "Radius: " << m_Radius << std::endl;
+}
+
 void CubeRenderer::SetupMatrices()
 {
-  // Матрицы
+  // Начинаем с единичной матрицы
   m_WorldMatrix = XMMatrixIdentity();
 
-  XMVECTOR eyePosition = XMVectorSet(3.0f, 3.0f, -3.0f, 0.0f);
-  XMVECTOR focusPoint = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
-  XMVECTOR upDirection = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-  m_ViewMatrix = XMMatrixLookAtLH(eyePosition, focusPoint, upDirection);
+  // Настраиваем камеру для охвата всей модели
+  m_CameraDistance = m_Radius * 3.0f;
+  m_CameraRotationX = XM_PIDIV4;
+  m_CameraRotationY = XM_PIDIV4;
+
+  UpdateCamera();
+}
+
+void CubeRenderer::UpdateCamera()
+{
+  // Сферические координаты
+  float cosX = cosf(m_CameraRotationX);
+  float sinX = sinf(m_CameraRotationX);
+  float cosY = cosf(m_CameraRotationY);
+  float sinY = sinf(m_CameraRotationY);
+
+  m_CameraPosition = XMFLOAT3(
+    m_Center.x + m_CameraDistance * cosX * sinY,
+    m_Center.y + m_CameraDistance * sinX,
+    m_Center.z + m_CameraDistance * cosX * cosY
+  );
+
+  m_CameraTarget = m_Center;
+
+  XMVECTOR eye = XMVectorSet(m_CameraPosition.x, m_CameraPosition.y, m_CameraPosition.z, 0.0f);
+  XMVECTOR focus = XMVectorSet(m_CameraTarget.x, m_CameraTarget.y, m_CameraTarget.z, 0.0f);
+  XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+
+  m_ViewMatrix = XMMatrixLookAtLH(eye, focus, up);
 
   m_ProjectionMatrix = XMMatrixPerspectiveFovLH(
     XM_PIDIV4,
     (float)m_WindowWidth / (float)m_WindowHeight,
     0.1f,
-    100.0f
+    m_Radius * 10.0f
   );
 }
 
 void CubeRenderer::SetupLight()
 {
-  // Данные освещения
   LightBuffer lightData;
-  lightData.lightPos = XMFLOAT3(2.0f, 5.0f, -3.0f);
-  lightData.cameraPos = XMFLOAT3(3.0f, 3.0f, -3.0f);
+  lightData.lightPos = XMFLOAT3(5.0f, 10.0f, -5.0f);
+  lightData.cameraPos = m_CameraPosition;
   lightData.lightColor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 
   void* pLightDataBegin = nullptr;
@@ -687,32 +972,43 @@ void CubeRenderer::SetupLight()
 
 void CubeRenderer::PopulateCommandList()
 {
-  // Сброс командного аллокатора
   HRESULT hr = m_CommandAllocators[m_FrameIndex]->Reset();
   if (FAILED(hr)) return;
 
-  // Сброс списка команд
   hr = m_CommandList->Reset(m_CommandAllocators[m_FrameIndex].Get(), m_PipelineState.Get());
   if (FAILED(hr)) return;
 
-  // ВРАЩЕНИЕ
+  // ВРАЩЕНИЕ МОДЕЛИ - как у куба в оригинальном коде
   m_Timer.Tick();
   m_RotationAngle += m_Timer.GetDeltaTime() * 0.3f;
 
-  // Обновление матриц
+  // Создаем матрицы вращения
   XMMATRIX rotationX = XMMatrixRotationX(m_RotationAngle * 0.5f);
   XMMATRIX rotationY = XMMatrixRotationY(m_RotationAngle);
   XMMATRIX rotationZ = XMMatrixRotationZ(m_RotationAngle * 0.3f);
+
+  // Комбинируем вращения
   m_WorldMatrix = rotationX * rotationY * rotationZ;
 
-  // Обновление константного буфера матриц
+  // Обновление буфера освещения
+  LightBuffer lightData;
+  lightData.lightPos = XMFLOAT3(5.0f, 10.0f, -5.0f);
+  lightData.cameraPos = m_CameraPosition;
+  lightData.lightColor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+
+  void* pLightDataBegin = nullptr;
+  D3D12_RANGE readRange = { 0, 0 };
+  m_LightBuffer->Map(0, &readRange, &pLightDataBegin);
+  memcpy(pLightDataBegin, &lightData, sizeof(LightBuffer));
+  m_LightBuffer->Unmap(0, nullptr);
+
+  // Обновление матриц
   MatrixBuffer matrices;
   matrices.world = XMMatrixTranspose(m_WorldMatrix);
   matrices.view = XMMatrixTranspose(m_ViewMatrix);
   matrices.projection = XMMatrixTranspose(m_ProjectionMatrix);
 
   void* pConstantDataBegin = nullptr;
-  D3D12_RANGE readRange = { 0, 0 };
   m_ConstantBuffer->Map(0, &readRange, &pConstantDataBegin);
   memcpy(pConstantDataBegin, &matrices, sizeof(MatrixBuffer));
   m_ConstantBuffer->Unmap(0, nullptr);
@@ -720,10 +1016,8 @@ void CubeRenderer::PopulateCommandList()
   // Установка корневой сигнатуры
   m_CommandList->SetGraphicsRootSignature(m_RootSignature.Get());
 
-  // Установка CBV для матриц (b0)
+  // Установка CBV
   m_CommandList->SetGraphicsRootConstantBufferView(0, m_ConstantBuffer->GetGPUVirtualAddress());
-
-  // Установка CBV для освещения (b1)
   m_CommandList->SetGraphicsRootConstantBufferView(1, m_LightBuffer->GetGPUVirtualAddress());
 
   // Установка целей рендеринга
@@ -734,26 +1028,22 @@ void CubeRenderer::PopulateCommandList()
 
   m_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-  // Очистка светло-зеленым цветом
-  float clearColor[4] = { 0.56f, 0.93f, 0.56f, 1.0f };
+  // Очистка
+  float clearColor[4] = { 0.4f, 0.6f, 0.9f, 1.0f };
   m_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
   m_CommandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
-  // Установка состояния конвейера
+  // Установка состояния
   m_CommandList->RSSetViewports(1, &m_Viewport);
   m_CommandList->RSSetScissorRects(1, &m_ScissorRect);
-
-  // Установка примитивной топологии
   m_CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-  // Установка буферов вершин и индексов
   m_CommandList->IASetVertexBuffers(0, 1, &m_VertexBufferView);
   m_CommandList->IASetIndexBuffer(&m_IndexBufferView);
 
   // Отрисовка
   m_CommandList->DrawIndexedInstanced(m_IndexCount, 1, 0, 0, 0);
 
-  // Переход состояния ресурса
+  // Переход состояния
   D3D12_RESOURCE_BARRIER barrier = {};
   barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
   barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
@@ -764,7 +1054,6 @@ void CubeRenderer::PopulateCommandList()
 
   m_CommandList->ResourceBarrier(1, &barrier);
 
-  // Закрытие списка команд
   hr = m_CommandList->Close();
 }
 
@@ -774,11 +1063,9 @@ void CubeRenderer::Render()
 
   PopulateCommandList();
 
-  // Выполнение списка команд
   ID3D12CommandList* ppCommandLists[] = { m_CommandList.Get() };
   m_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
-  // Презентация
   m_SwapChain->Present(1, 0);
 
   WaitForPreviousFrame();
@@ -786,15 +1073,12 @@ void CubeRenderer::Render()
 
 void CubeRenderer::WaitForPreviousFrame()
 {
-  // Сигнал забора
   const UINT64 fenceValue = m_FenceValues[m_FrameIndex];
   HRESULT hr = m_CommandQueue->Signal(m_Fence.Get(), fenceValue);
   if (FAILED(hr)) return;
 
-  // Обновление индекса кадра
   m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();
 
-  // Если последний кадр еще не закончен, ждем его завершения
   if (m_Fence->GetCompletedValue() < m_FenceValues[m_FrameIndex])
   {
     hr = m_Fence->SetEventOnCompletion(m_FenceValues[m_FrameIndex], m_FenceEvent);
@@ -803,7 +1087,6 @@ void CubeRenderer::WaitForPreviousFrame()
     WaitForSingleObject(m_FenceEvent, INFINITE);
   }
 
-  // Установка значения забора для следующего кадра
   m_FenceValues[m_FrameIndex] = fenceValue + 1;
 }
 
@@ -816,14 +1099,12 @@ void CubeRenderer::Resize(int width, int height)
 
   WaitForPreviousFrame();
 
-  // Освобождаем ресурсы
   for (UINT i = 0; i < FrameCount; i++)
   {
     m_RenderTargets[i].Reset();
     m_FenceValues[i] = m_FenceValues[m_FrameIndex];
   }
 
-  // Изменяем размер буферов свопчейна
   DXGI_SWAP_CHAIN_DESC desc;
   m_SwapChain->GetDesc(&desc);
   HRESULT hr = m_SwapChain->ResizeBuffers(FrameCount, width, height, desc.BufferDesc.Format, desc.Flags);
@@ -831,7 +1112,6 @@ void CubeRenderer::Resize(int width, int height)
 
   m_FrameIndex = 0;
 
-  // Создаем новые представления для буферов рендеринга
   D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_RtvHeap->GetCPUDescriptorHandleForHeapStart();
   for (UINT i = 0; i < FrameCount; i++)
   {
@@ -842,7 +1122,6 @@ void CubeRenderer::Resize(int width, int height)
     rtvHandle.ptr += m_RtvDescriptorSize;
   }
 
-  // Создаем новый ресурс глубины/трафарета
   m_DepthStencil.Reset();
 
   D3D12_RESOURCE_DESC depthStencilDesc = {};
@@ -886,19 +1165,12 @@ void CubeRenderer::Resize(int width, int height)
   dsvDesc.Texture2D.MipSlice = 0;
   m_Device->CreateDepthStencilView(m_DepthStencil.Get(), &dsvDesc, m_DsvHeap->GetCPUDescriptorHandleForHeapStart());
 
-  // Обновляем вьюпорт и прямоугольник отсечения
   m_Viewport.Width = static_cast<float>(width);
   m_Viewport.Height = static_cast<float>(height);
   m_ScissorRect.right = static_cast<LONG>(width);
   m_ScissorRect.bottom = static_cast<LONG>(height);
 
-  // Обновляем матрицу проекции
-  m_ProjectionMatrix = XMMatrixPerspectiveFovLH(
-    XM_PIDIV4,
-    (float)width / (float)height,
-    0.1f,
-    100.0f
-  );
+  UpdateCamera();
 }
 
 void CubeRenderer::Cleanup()
