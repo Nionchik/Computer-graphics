@@ -11,11 +11,11 @@ void Timer::Tick()
 {
   auto currentTime = std::chrono::high_resolution_clock::now();
 
-  // Вычисляем дельта-время в секундах
+  // Р’С‹С‡РёСЃР»СЏРµРј РґРµР»СЊС‚Р°-РІСЂРµРјСЏ РІ СЃРµРєСѓРЅРґР°С…
   auto deltaTime = std::chrono::duration<float>(currentTime - m_PreviousTime);
   m_DeltaTime = deltaTime.count();
 
-  // Вычисляем общее время
+  // Р’С‹С‡РёСЃР»СЏРµРј РѕР±С‰РµРµ РІСЂРµРјСЏ
   auto totalTime = std::chrono::duration<float>(currentTime - m_StartTime);
   m_TotalTime = totalTime.count();
 
