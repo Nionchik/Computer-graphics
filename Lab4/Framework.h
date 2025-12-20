@@ -15,7 +15,7 @@
 #include <vector>
 #include <memory>
 
-// Включаем вспомогательные заголовки DirectX
+// Р’РєР»СЋС‡Р°РµРј РІСЃРїРѕРјРѕРіР°С‚РµР»СЊРЅС‹Рµ Р·Р°РіРѕР»РѕРІРєРё DirectX
 #include <DirectXPackedVector.h>
 #include <DirectXColors.h>
 
@@ -26,5 +26,5 @@
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 
-// Вспомогательные структуры DirectX 12
+// Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅС‹Рµ СЃС‚СЂСѓРєС‚СѓСЂС‹ DirectX 12
 #include "d3dx12.h" 
