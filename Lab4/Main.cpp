@@ -7,7 +7,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
   UNREFERENCED_PARAMETER(hPrevInstance);
   UNREFERENCED_PARAMETER(lpCmdLine);
 
-  // Создаем окно
+  // РЎРѕР·РґР°РµРј РѕРєРЅРѕ
   Window window(hInstance, 800, 600, L"DirectX 12 Cube with Phong Lighting");
   CubeRenderer renderer;
   InputDevice inputDevice;
@@ -18,7 +18,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
     return 1;
   }
 
-  // Настройка колбэков
+  // РќР°СЃС‚СЂРѕР№РєР° РєРѕР»Р±СЌРєРѕРІ
   window.SetKeyCallback([&](WPARAM key, bool pressed) {
     if (pressed)
       inputDevice.OnKeyDown(key);
@@ -31,33 +31,33 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
       renderer.Resize(width, height);
     });
 
-  // Инициализация рендерера
+  // РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ СЂРµРЅРґРµСЂРµСЂР°
   if (!renderer.Initialize(window.GetHandle(), window.GetWidth(), window.GetHeight()))
   {
     MessageBoxW(nullptr, L"Failed to initialize DirectX 12 renderer", L"Error", MB_OK | MB_ICONERROR);
     return 1;
   }
 
-  // Показ окна
+  // РџРѕРєР°Р· РѕРєРЅР°
   window.Show(nCmdShow);
 
-  // Главный цикл
+  // Р“Р»Р°РІРЅС‹Р№ С†РёРєР»
   while (window.ProcessMessages())
   {
-    // Обновление состояния ввода
+    // РћР±РЅРѕРІР»РµРЅРёРµ СЃРѕСЃС‚РѕСЏРЅРёСЏ РІРІРѕРґР°
     inputDevice.Update();
 
-    // Рендеринг
+    // Р РµРЅРґРµСЂРёРЅРі
     renderer.Render();
 
-    // Выход по Escape
+    // Р’С‹С…РѕРґ РїРѕ Escape
     if (inputDevice.IsKeyPressed(VK_ESCAPE))
     {
       PostQuitMessage(0);
     }
   }
 
-  // Очистка
+  // РћС‡РёСЃС‚РєР°
   renderer.Cleanup();
 
   return 0;
